@@ -12,6 +12,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@getbrevo/brevo": "^5.0.4",
+    "@supabase/supabase-js": "^2.107.0",
     "@upstash/qstash": "^2.11.0",
     "@upstash/redis": "^1.38.0",
     "axios": "^1.16.1",
@@ -21,7 +23,11 @@
     "express": "^5.2.1",
     "express-validator": "^7.3.2",
     "firebase-admin": "^13.10.0",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "maileroo-sdk": "^1.0.1",
+    "nodemailer": "^8.0.10",
+    "pdfkit": "^0.18.0",
+    "resend": "^6.12.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

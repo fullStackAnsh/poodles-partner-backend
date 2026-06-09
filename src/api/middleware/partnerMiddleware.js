@@ -6,20 +6,28 @@ const jwt = require('jsonwebtoken');
  */
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token = null;
+
+  // 1. Try to read from Authorization Header
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } 
+  // 2. Fallback: Try to read directly from the cookie container automatically forwarded by Axios
+  else if (req.cookies && req.cookies._at) {
+    token = req.cookies._at;
+  }
+
+  // If no token is discovered in either location, deny entry
+  if (!token) {
     return res.status(401).json({ 
       success: false, 
       message: "Access Denied: No authentication token provided." 
     });
   }
 
-  const token = authHeader.split(' ')[1];
-
   try {
-    // Decode and verify signature against our local system secret
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    req.user = decoded; // Stash decoded info (uid, role, partnerType) into the request context
+    req.user = decoded; 
     next();
   } catch (error) {
     let errorMessage = "Invalid or expired session token.";
@@ -29,7 +37,6 @@ const verifyToken = (req, res, next) => {
     return res.status(401).json({ success: false, message: errorMessage });
   }
 };
-
 /**
  * 2. Role Enforcement Gate: Ensures the user has a "partner" profile classification
  */
@@ -55,7 +62,7 @@ const partnerMiddleware = (req, res, next) => {
  * 3. Specific Feature Guard: Restricts route block access strictly to veterinarians
  */
 const vetGuard = (req, res, next) => {
-  if (!req.user || req.user.partnerType !== 'vet') {
+  if (!req.user || req.user.partnerType !== 'vet' || req.user.partnerType !== 'veterinarian') {
     return res.status(403).json({ 
       success: false, 
       message: "Forbidden: Access restricted to verified veterinary profiles." 

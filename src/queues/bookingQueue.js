@@ -38,15 +38,15 @@ router.post('/booking-worker', verifyQStash, async (req, res) => {
     const rawData = await redis.lpop(queueKey);
     if (!rawData) return res.status(200).json({ message: 'Queue is currently clean.' });
 
-    // Simply assign it directly!
-    const payload = rawData;
+    // Ensure the payload string from Redis is parsed properly into a usable object
+    const payload = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
 
     // Matching Algorithm Implementation
     // Querying active partners with matched availability
     const partnerSnapshot = await db.collection('partners')
-  .where('partnerType', '==', serviceType)
-  .where('status', '==', 'active')
-  .get();
+      .where('partnerType', '==', serviceType)
+      .where('status', '==', 'active')
+      .get();
 
     if (partnerSnapshot.empty) {
       console.log('No partners found matching criteria. Refunding... ');
@@ -88,8 +88,32 @@ router.post('/booking-worker', verifyQStash, async (req, res) => {
       chatEnabled: false
     };
 
+    // 1. Persist primary transaction booking context
     await db.collection('bookings').doc(bookingId).set(newBooking);
     console.log(`Successfully assigned Booking ${bookingId} to Partner ${bestPartner.uid}`);
+
+    // 2. 🛠️ Check conditional serviceType to generate live session tracking architecture
+    if (payload.serviceType === 'boarding' || payload.serviceType === 'Dog Walker' || payload.serviceType === 'walker') {
+      const liveSessionData = {
+        bookingId: bookingId,
+        walkerId: bestPartner.uid,
+        userId: payload.petOwnerUid,
+        petId: payload.petProfileId,
+        
+        // Tracking Metrics Init
+        sessionStatus: 'scheduled', // lifecycle: scheduled -> active -> completed
+        startTime: admin.firestore.Timestamp.fromDate(new Date(payload.scheduledDate)), // 🌟 Extracted directly from user payload
+        currentLocation: null,
+        coordinatesTimeline: [],    // Stores spatial lat/lng structures from client
+        startedAt: null,             // Remains null until partner physically starts the walk
+        endedAt: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      // Provision document using an identical matching ID
+      await db.collection('walkSessions').doc(bookingId).set(liveSessionData);
+      console.log(`Successfully provisioned matching tracking session for Walking/Boarding configuration.`);
+    }
 
     return res.status(200).json({ success: true, bookingId });
   } catch (error) {

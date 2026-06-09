@@ -5,21 +5,34 @@ class PartnerController {
    * Action: Generic OTP dispatcher
    */
   async sendOtp(req, res) {
-    try {
-      const { email } = req.body;
-      if (!email) {
-        return res.status(400).json({ success: false, message: "Email parameter is required to send code." });
-      }
-
-      await PartnerService.dispatchOtp(email);
-      return res.status(200).json({ 
-        success: true, 
-        message: "A 6-digit authentication code has been generated and dispatched successfully." 
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, message: error.message });
+  try {
+    const { email } = req.body;
+    
+    // 1. Presence check
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email parameter is required to send code." });
     }
+
+    // 2. Syntax Validation via Regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Please provide a valid email format (e.g., user@example.com)." 
+      });
+    }
+
+    // If valid, proceed to dispatch
+    await PartnerService.dispatchOtp(email);
+    
+    return res.status(200).json({ 
+      success: true, 
+      message: "A 6-digit authentication code has been generated and dispatched successfully." 
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
+}
 
   /**
    * Action: Core processing gate validating login credential states or provisioning new signups

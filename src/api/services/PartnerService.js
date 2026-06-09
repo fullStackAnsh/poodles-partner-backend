@@ -1,6 +1,16 @@
 const { db } = require('../../config/firebase');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer'); // 1. Import Nodemailer
+
+// 2. Create the Nodemailer Transport using Gmail settings
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 class PartnerService {
   /**
@@ -13,29 +23,60 @@ class PartnerService {
   /**
    * Dispatches or simulates an OTP verification challenge
    */
+
   async dispatchOtp(identity) {
     const cleanIdentity = identity.trim().toLowerCase();
     const generatedOtp = this.generateNumericOtp();
-    
-    const expiryWindow = 10 * 60 * 1000; // 10 minutes validation life
+    const expiryWindow = 10 * 60 * 1000;
     const expiresAt = new Date(Date.now() + expiryWindow);
 
+    // 1. Database Persistence
     await db.collection('otps').doc(cleanIdentity).set({
       otp: generatedOtp,
       expiresAt: expiresAt,
       attempts: 0,
+      createdAt: new Date()
     });
 
+    // 2. Local Environment Check
     if (process.env.NODE_ENV !== 'production') {
       console.log(`\n============== [DEV OTP MONITOR] ==============`);
       console.log(`Target: ${cleanIdentity}`);
       console.log(`Your Verification Code is: ${generatedOtp}`);
-      console.log(`Expires At: ${expiresAt.toISOString()}`);
       console.log(`================================================\n`);
-    }
+      return true;
+    }  
 
-    return true;
+    // 3. API Transaction Delivery via Nodemailer
+    try {
+      console.log(`[Nodemailer Sync] Attempting network dispatch to: ${cleanIdentity}...`);
+      
+      const mailOptions = {
+        from: `"${process.env.SENDER_NAME || 'Your App'}" <${process.env.EMAIL_USER}>`,
+        to: cleanIdentity,
+        subject: "Your Verification Code",
+        html: `<h3>Your code is: <strong>${generatedOtp}</strong></h3>`,
+        text: `Your code is: ${generatedOtp}`
+      };
+
+      // Send the email
+      const info = await transporter.sendMail(mailOptions);
+
+      console.log("\n🚀 ====== NODEMAILER SUCCESS RESPONSE ======");
+      console.log("Message ID:", info.messageId);
+      console.log("============================================\n");
+      
+      return true;
+    } catch (error) {
+      console.log("\n❌ ====== NODEMAILER ERROR DETECTED ======");
+      console.error("Error details:", error.message || error);
+      console.log("==========================================\n");
+      
+      throw new Error("Verification delivery failed. Please check backend logs.");
+    }
   }
+
+
 
   /**
    * Validates OTP inputs and registers or logs in the partner context
@@ -54,6 +95,12 @@ class PartnerService {
     }
 
     const { otp, expiresAt, attempts } = otpDoc.data();
+
+    if (attempts >= 5) {
+      const error = new Error("Too many failed attempts. For security, please request a new code.");
+      error.statusCode = 429; // Use 429 Too Many Requests for rate limiting
+      throw error;
+    }
 
     if (new Date() > expiresAt.toDate()) {
       await otpRef.delete();
@@ -102,6 +149,7 @@ class PartnerService {
         await newUserRef.set({
           username: signupData.username,
           email: cleanIdentity,
+          phone: signupData.phone || '', // 🌟 Added phone field mapping here
           role: 'partner',
           createdAt: new Date()
         });
@@ -110,6 +158,7 @@ class PartnerService {
         await db.collection('partners').doc(userUid).set({
           uid: userUid,
           displayName: signupData.username,
+          phone: signupData.phone || '', // 🌟 Synchronized into partner profile for easy UI retrieval
           partnerType: partnerType,
           serviceDescription: '',
           status: 'inactive', // Becomes 'active' upon onboarding completion
@@ -169,12 +218,12 @@ class PartnerService {
         partnerType: partnerType
       }
     };
-  }
+}
 
   /**
    * Complete Partner Onboarding Form Submission Step
    */
-  async completePartnerOnboarding(uid, onboardingData) {
+ async completePartnerOnboarding(uid, onboardingData) {
     const partnerRef = db.collection('partners').doc(uid);
     const doc = await partnerRef.get();
 
@@ -218,6 +267,12 @@ class PartnerService {
       profilePhoto: onboardingData.profilePhoto || '',
       specializations: onboardingData.specializations || [],
       licenseNumber: resolvedType === 'vet' ? onboardingData.licenseNumber : null,
+      
+      // 🌟 Conditionally set maxCapacityPerSlot as an integer for Dog Walkers ('boarding')
+      maxCapacityPerSlot: resolvedType === 'boarding' 
+        ? parseInt(onboardingData.maxCapacityPerSlot, 10) || 0 
+        : null,
+
       status: 'active', // Set active following successful wizard mapping
       fcmToken: onboardingData.fcmToken || null,
       updatedAt: new Date()
@@ -226,7 +281,7 @@ class PartnerService {
     await partnerRef.update(completedProfile);
     const updatedDoc = await partnerRef.get();
     return updatedDoc.data();
-  }
+}
 
   /**
    * Fetches the unique profile doc out of Firestore
